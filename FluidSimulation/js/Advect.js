@@ -1,3 +1,5 @@
+/*global THREE:true*/
+/*global Advect:true*/
 Advect = function(res, camera) {
     this.res = res;
     this.camera = camera;

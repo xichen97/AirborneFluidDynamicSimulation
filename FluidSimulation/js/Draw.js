@@ -1,3 +1,6 @@
+/*global THREE:true*/
+/*global Draw:true*/
+
 Draw = function(res, camera){
     this.res = res;
     this.camera = camera;

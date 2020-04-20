@@ -1,3 +1,5 @@
+/*global THREE:true*/
+/*global ExternalVelocity:true*/
 ExternalVelocity = function(res, camera) {
     this.res = res;
     this.camera = camera;

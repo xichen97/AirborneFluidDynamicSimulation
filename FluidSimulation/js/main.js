@@ -1,12 +1,17 @@
 // GUI
+/*global THREE:true*/
+/*global Advect:true*/
+/*global ExternalVelocity:true*/
+/*global Draw:true*/
+/*global Slab:true*/
 var scene;
 var camera;
 var renderer;
 
 // properties
 var velocity;
-var density;
-var pressure;
+//var density;
+//var pressure;
 
 // slabs
 var drawTexture;
@@ -25,7 +30,7 @@ var width;
 var height;
 var res = new THREE.Vector2(640, 480);
 
-var color = [50,50,50];
+//var color = [50,50,50];
 
 var radiusSettings = {
     Radius: 8.0
@@ -59,7 +64,7 @@ function texture_setup(){
     advect = new Advect(res, camera);
     externalVelocity = new ExternalVelocity(res, camera);
     draw = new Draw(res, camera);
-
+    
     velocity = new Slab(res);
     
     drawTexture = new THREE.WebGLRenderTarget( res.x, res.y, {  minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat, type: THREE.FloatType } );
