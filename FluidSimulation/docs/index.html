@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+        <title>Fluid Simulator</title>
+        <style>
+            body {
+                margin: 0;
+                overflow: hidden;
+            }
+
+            canvas {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <script id = "Advect" type = "shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform sampler2D velocityField;
+            uniform sampler2D advectionField;
+            uniform float dissipation;
+            float dt  = 1.0;
+
+            vec2 bilerp(sampler2D texture, vec2 coord)
+            {
+
+                float s = coord.x - (floor(coord.x - 0.5) + 0.5);
+                float t = coord.y - (floor(coord.y - 0.5) + 0.5);
+    
+                vec4 uv;
+                uv.xy = (floor(coord - 0.5) + 0.5) / res.xy;
+                uv.zw= (floor(coord - 0.5) + 1.5) / res.xy;
+    
+                vec2 u00 = texture2D(texture, uv.xy).xy;
+                vec2 u10 = texture2D(texture, uv.zy).xy;
+    
+                vec2 u0 = mix(u00, u10, s);
+    
+                vec2 u01 = texture2D(texture, uv.xw).xy;
+                vec2 u11 = texture2D(texture, uv.zw).xy;
+    
+                vec2 u1 =  mix(u01, u11, s);
+    
+                return mix(u0, u1, t);
+            }
+
+        
+            void main(){
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec2 last_position = gl_FragCoord.xy - texture2D(velocityField, coord).xy * dt;
+                gl_FragColor = vec4(dissipation * bilerp(advectionField, last_position), 0.0, 1.0);
+            }
+            
+        </script>
+
+        <script id="ExternalVelocity" type="shader-code">
+            uniform vec2 res;                    // The width and height of our screen
+            uniform sampler2D bufferTexture;     // Our input texture
+            uniform vec3 smokeSource;            // The x,y are the posiiton. 
+            uniform vec2 sourceVelocity;
+            uniform float radius;
+    
+            void main() {
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                vec2 smoke = smokeSource.z * max(radius-dist,0.0) * sourceVelocity / res.xy;
+                gl_FragColor = vec4(texture2D(bufferTexture, coord).xy + smoke, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="Draw" type="shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform vec3 bias;
+            uniform vec3 scale;
+            uniform sampler2D bufferTexture;
+    
+            void main() {
+                vec2 pixel = gl_FragCoord.xy / res.xy;
+                gl_FragColor = vec4(bias + scale * texture2D(bufferTexture, pixel).xyz, 1.0);
+            }
+        </script>
+
+        
+        <script src="../js/three.js"></script>
+        <script src="../js/Advect.js"></script>
+        <script src="../js/ExternalVelocity.js"></script>
+        <script src="../js/Draw.js"></script>
+        <script src="../js/Slab.js"></script>
+        <script src="../js/main.js"></script>
+    </body>
+
+
+</html>
