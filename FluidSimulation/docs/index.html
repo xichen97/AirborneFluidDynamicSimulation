@@ -24,7 +24,7 @@
             uniform sampler2D velocityField;
             uniform sampler2D advectionField;
             uniform float dissipation;
-            float dt  = 1.0;
+            uniform float dt;
 
             vec2 bilerp(sampler2D texture, vec2 coord)
             {
@@ -34,7 +34,7 @@
     
                 vec4 uv;
                 uv.xy = (floor(coord - 0.5) + 0.5) / res.xy;
-                uv.zw= (floor(coord - 0.5) + 1.5) / res.xy;
+                uv.zw = (floor(coord - 0.5) + 1.5) / res.xy;
     
                 vec2 u00 = texture2D(texture, uv.xy).xy;
                 vec2 u10 = texture2D(texture, uv.zy).xy;
@@ -58,18 +58,70 @@
             
         </script>
 
+        <script id="ExternalForces" type="shader-code">
+            uniform vec2 res;             
+            uniform sampler2D velocityField;
+
+            uniform sampler2D densityField;
+            uniform float kappa;
+            uniform sampler2D temperatureField;
+            uniform float ambientTemperature;
+            uniform float sigma;
+            
+            
+            uniform float gravity;
+            uniform float dt;
+
+            void main() {
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec4 v = texture2D(velocityField, coord);
+                float t = texture2D(temperatureField, coord).x;
+                float d = texture2D(densityField, coord).x;
+
+                gl_FragColor  = v;
+                
+                // gravity
+                gl_FragColor  += vec4(0.0, -gravity * dt , 0.0, 0.0); 
+
+                // buoyancy
+                //down (density related)
+                gl_FragColor  += vec4(0.0, -d * kappa * dt, 0.0, 0.0);  // kappa is a constant mass scale factor.
+                
+                //up (temperature related)
+                gl_FragColor  += vec4(0.0, sigma * (t - ambientTemperature) * dt, 0.0, 0.0);  
+            }
+        </script>
+
+
         <script id="ExternalVelocity" type="shader-code">
             uniform vec2 res;                    // The width and height of our screen
             uniform sampler2D bufferTexture;     // Our input texture
             uniform vec3 smokeSource;            // The x,y are the posiiton. 
             uniform vec2 sourceVelocity;
             uniform float radius;
+            uniform float dt;
     
             void main() {
                 vec2 coord = gl_FragCoord.xy / res.xy;
                 float dist = distance(smokeSource.xy,gl_FragCoord.xy);
                 vec2 smoke = smokeSource.z * max(radius-dist,0.0) * sourceVelocity / res.xy;
                 gl_FragColor = vec4(texture2D(bufferTexture, coord).xy + smoke, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="ExternalDensity" type="shader-code">
+            uniform vec2 res;                    // The width and height of our screen
+            uniform sampler2D bufferTexture;     // Our input texture
+            uniform vec3 smokeSource;            // The x,y are the posiiton. 
+            uniform vec3 color;
+            uniform float radius;
+            uniform float dt;
+    
+            void main() {
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                vec3 smoke = vec3(smokeSource.z * max(radius-dist,0.0) / res.xy, 0.0) * color;
+                gl_FragColor = vec4(texture2D(bufferTexture, coord).xyz + smoke, 1.0);
             }
         </script>
 
@@ -82,7 +134,84 @@
     
             void main() {
                 vec2 pixel = gl_FragCoord.xy / res.xy;
-                gl_FragColor = vec4(bias + scale * texture2D(bufferTexture, pixel).xyz, 1.0);
+                vec3 v = bias + scale * texture2D(bufferTexture, pixel).xyz;
+                v.x = min(v.x, 1.0);
+                v.x = max(v.x, 0.0);
+                v.y = min(v.y, 1.0);
+                v.y = max(v.y, 0.0);
+                v.z = min(v.z, 1.0);
+                v.z = max(v.z, 0.0);
+                gl_FragColor = vec4(v, 1.0);
+            }
+        </script>
+
+        <script id="Divergence" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D u;
+            uniform float dx;
+            uniform float dy;
+    
+            void main() {
+                vec2 istep = vec2(1.0 / res.x, 0.0);
+                vec2 jstep = vec2(0.0, 1.0 / res.y);
+                vec2 ij = gl_FragCoord.xy / res.xy;
+    
+                float uterm = (texture2D(u, ij + istep).x - texture2D(u, ij - istep).x) / (2.0 * dx);
+                float vterm = (texture2D(u, ij + jstep).y - texture2D(u, ij - jstep).y) / (2.0 * dy);
+    
+                gl_FragColor = vec4(uterm + vterm, 0.0, 0.0, 1.0);
+    
+            }
+        </script>
+
+        <script id="Jacobi" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D x;
+            uniform sampler2D b;
+            uniform float alpha;
+            uniform float beta;
+    
+            void main() {
+                vec2 istep = vec2(1.0 / res.x, 0.0);
+                vec2 jstep = vec2(0.0, 1.0 / res.y);
+                vec2 ij = gl_FragCoord.xy / res.xy;
+    
+                gl_FragColor = vec4( (texture2D(x, ij - istep).x + texture2D(x, ij + istep).x + texture2D(x, ij + jstep).x + texture2D(x, ij - jstep).x + alpha * texture2D(b, ij).x) / beta, 0.0, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="SubtractGradient" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D w;
+            uniform sampler2D p;
+            uniform float dx;
+            uniform float dy;
+            uniform float dt;
+    
+            void main() {
+                vec2 istep = vec2(1.0 / res.x, 0.0);
+                vec2 jstep = vec2(0.0, 1.0 / res.y);
+                vec2 ij = gl_FragCoord.xy / res.xy;
+    
+                vec2 gradient = vec2((texture2D(p, ij + istep).x - texture2D(p, ij - istep).x) / (2.0 * dx), (texture2D(p, ij + jstep).x - texture2D(p, ij - jstep).x) / (2.0 * dy));
+    
+                gl_FragColor = vec4(texture2D(w, ij).xy - gradient * dt, 0.0, 1.0);
+    
+            }
+        </script>
+
+        <script id="ExternalTemperature" type="shader-code">
+            uniform vec2 res;                    //The width and height of our screen
+            uniform sampler2D bufferTexture;     //Our input texture
+            uniform vec3 smokeSource;            //The x,y are the posiiton. The z is the power/density
+            uniform float temp;
+            uniform float radius;
+    
+            void main() {
+                vec2 pixel = gl_FragCoord.xy / res.xy;
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                float smoke = smokeSource.z * max(radius-dist,0.0) * temp;
+                gl_FragColor = vec4(texture2D(bufferTexture, pixel).x + smoke, 0.0, 0.0, 1.0);
             }
         </script>
 
@@ -90,6 +219,12 @@
         <script src="../js/three.js"></script>
         <script src="../js/Advect.js"></script>
         <script src="../js/ExternalVelocity.js"></script>
+        <script src="../js/ExternalForces.js"></script>
+        <script src="../js/ExternalDensity.js"></script>
+        <script src="../js/ExternalTemperature.js"></script>
+        <script src= "../js/Divergence.js"></script>
+        <script src= "../js/Jacobi.js"></script>
+        <script src="../js/SubtractGradient.js"></script>
         <script src="../js/Draw.js"></script>
         <script src="../js/Slab.js"></script>
         <script src="../js/main.js"></script>
