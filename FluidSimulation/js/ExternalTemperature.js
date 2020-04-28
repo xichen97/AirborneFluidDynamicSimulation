@@ -4,7 +4,7 @@
 ExternalTemperature = function(res, camera) {
     var geometry = new THREE.PlaneBufferGeometry( 2 * (512 - 2) / 512, 2 * (256 - 2) / 256 );
     this.res = res;
-    this.smokeSource = new THREE.Vector3(100, 200, 1);
+    this.smokeSource = new THREE.Vector3(0, 0, 0);
     this.uniforms = {
         bufferTexture: { value: new THREE.Texture() },
         res : {value: new THREE.Vector2()},

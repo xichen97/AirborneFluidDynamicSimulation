@@ -18,6 +18,7 @@
         </style>
     </head>
     <body>
+        <div id="btn"></div>
         <script id = "Advect" type = "shader-code">
             precision mediump float;
             uniform vec2 res;
@@ -54,8 +55,8 @@
                 vec2 coord = gl_FragCoord.xy / res.xy;
                 vec2 last_position = gl_FragCoord.xy - texture2D(velocityField, coord).xy * dt;
                 gl_FragColor = vec4(dissipation * bilerp(advectionField, last_position), 0.0, 1.0);
+                gl_FragColor.z = gl_FragColor.x;
             }
-            
         </script>
 
         <script id="ExternalForces" type="shader-code">
@@ -81,7 +82,7 @@
                 gl_FragColor  = v;
                 
                 // gravity
-                gl_FragColor  += vec4(0.0, -gravity * dt , 0.0, 0.0); 
+                //gl_FragColor  += vec4(0.0, -gravity * dt , 0.0, 0.0); 
 
                 // buoyancy
                 //down (density related)
@@ -113,14 +114,14 @@
             uniform vec2 res;                    // The width and height of our screen
             uniform sampler2D bufferTexture;     // Our input texture
             uniform vec3 smokeSource;            // The x,y are the posiiton. 
-            uniform vec3 color;
+            uniform vec3 sourceDensity;
             uniform float radius;
             uniform float dt;
     
             void main() {
                 vec2 coord = gl_FragCoord.xy / res.xy;
                 float dist = distance(smokeSource.xy,gl_FragCoord.xy);
-                vec3 smoke = vec3(smokeSource.z * max(radius-dist,0.0) / res.xy, 0.0) * color;
+                vec3 smoke = vec3(smokeSource.z * max(radius-dist,0.0) / res.xy, 0.0) * sourceDensity;
                 gl_FragColor = vec4(texture2D(bufferTexture, coord).xyz + smoke, 1.0);
             }
         </script>
@@ -152,15 +153,65 @@
             uniform float dy;
     
             void main() {
-                vec2 istep = vec2(1.0 / res.x, 0.0);
-                vec2 jstep = vec2(0.0, 1.0 / res.y);
-                vec2 ij = gl_FragCoord.xy / res.xy;
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
     
-                float uterm = (texture2D(u, ij + istep).x - texture2D(u, ij - istep).x) / (2.0 * dx);
-                float vterm = (texture2D(u, ij + jstep).y - texture2D(u, ij - jstep).y) / (2.0 * dy);
+                float uterm = (texture2D(u, cur + xstep).x - texture2D(u, cur - xstep).x) / (2.0 * dx);
+                float vterm = (texture2D(u, cur + ystep).y - texture2D(u, cur - ystep).y) / (2.0 * dy);
     
                 gl_FragColor = vec4(uterm + vterm, 0.0, 0.0, 1.0);
     
+            }
+        </script>
+
+        <script id="Curl" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D u;
+            uniform float dx;
+            uniform float dy;
+    
+            void main() {
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
+    
+                float dqdx = (texture2D(u, cur + ystep).x - texture2D(u, cur - ystep).x) / (2.0 * dx);
+                float dpdy = (texture2D(u, cur + xstep).y - texture2D(u, cur - xstep).y) / (2.0 * dy);
+    
+                gl_FragColor = vec4(dqdx - dpdy, 0.0, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="VorticityFunc" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D velocity;
+            uniform sampler2D curl;
+            uniform float weight;
+            uniform float dx;
+            uniform float dy;
+            uniform float dt;
+            uniform float threshold;
+    
+            void main() {
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
+    
+                float etaX = (abs(texture2D(velocity, cur + xstep).x) - abs(texture2D(velocity, cur - xstep).x)) / (2.0 * dx);
+                float etaY = (abs(texture2D(velocity, cur + ystep).y) - abs(texture2D(velocity, cur - ystep).y)) / (2.0 * dy);
+
+                vec2 force = vec2(0.0);
+
+                if (abs(etaX) > threshold && abs(etaY) > threshold) {
+    
+                    vec2 psi = vec2(etaX / abs(etaX), etaY / abs(etaY));
+                    vec2 vorticity = texture2D(curl, cur).xy;
+                    vec2 cross = vec2(psi.x * vorticity.y, psi.y * vorticity.x * -1.0);
+                    force = cross * dt;
+                }
+                vec2 new_velocity = texture2D(velocity, cur).xy;
+                gl_FragColor = vec4(new_velocity + weight * force, 0.0, 1.0);
             }
         </script>
 
@@ -218,6 +269,7 @@
         
         <script src="../js/three.js"></script>
         <script src="../js/Advect.js"></script>
+        <script src="../js/Curl.js"></script>
         <script src="../js/ExternalVelocity.js"></script>
         <script src="../js/ExternalForces.js"></script>
         <script src="../js/ExternalDensity.js"></script>
@@ -227,6 +279,7 @@
         <script src="../js/SubtractGradient.js"></script>
         <script src="../js/Draw.js"></script>
         <script src="../js/Slab.js"></script>
+        <script src="../js/VorticityFunc.js"></script>
         <script src="../js/main.js"></script>
     </body>
 

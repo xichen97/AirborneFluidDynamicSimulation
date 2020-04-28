@@ -54,10 +54,10 @@ Draw.prototype.process = function(renderer, input, output){
 
 Draw.prototype.displayVelocity = function() {
     this.bias = new THREE.Vector3(0.5,0.5,0.5);
-    this.scale = new THREE.Vector3(0.5,0.5,0.5); 
+    this.scale = new THREE.Vector3(0.5,0.5,0); 
 }
 
 Draw.prototype.displayDensity = function() {
     this.bias = new THREE.Vector3(0,0,0);
-    this.scale = new THREE.Vector3(0.2,0.2,1); 
+    this.scale = new THREE.Vector3(0.5,0.6,1); 
 }

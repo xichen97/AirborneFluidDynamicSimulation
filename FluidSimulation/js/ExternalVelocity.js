@@ -4,8 +4,8 @@ ExternalVelocity = function(res, camera) {
     this.res = res;
     this.camera = camera;
     var geometry = new THREE.PlaneBufferGeometry(2 * (res.x-2)/res.x , 2 * (res.y-2)/ res.y);
-    this.smokeSource = new THREE.Vector3(100, 200, 1);
-    this.sourceVelocity = new THREE.Vector2(500, 0);
+    this.smokeSource = new THREE.Vector3(0, 0, 0);
+    this.sourceVelocity = new THREE.Vector2(0, 0);
 
     this.uniforms = {
         bufferTexture: {value: new THREE.Texture()},
