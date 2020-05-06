@@ -49,7 +49,7 @@ Draw.prototype.process = function(renderer, input, output){
     renderer.clear(false);
     renderer.render(this.scene, this.camera);
     renderer.setRenderTarget(null);
-    console.log("I'm HERE in DRAW!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    //console.log("I'm HERE in DRAW!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 }
 
 Draw.prototype.displayVelocity = function() {
@@ -59,5 +59,5 @@ Draw.prototype.displayVelocity = function() {
 
 Draw.prototype.displayDensity = function() {
     this.bias = new THREE.Vector3(0,0,0);
-    this.scale = new THREE.Vector3(0.5,0.6,1); 
+    this.scale = new THREE.Vector3(0.25,0.2,0.15); 
 }

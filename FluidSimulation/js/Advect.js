@@ -11,7 +11,7 @@ Advect = function(res, camera) {
         velocityField: {value: new THREE.Texture()},
         advectionField: {value: new THREE.Texture()},
         dissipation: {value: 1.0},
-        dt:{value: 1.0}
+        dt: {value: 1.0}
     };
     var material = new THREE.ShaderMaterial({
         uniforms: this.uniforms,
