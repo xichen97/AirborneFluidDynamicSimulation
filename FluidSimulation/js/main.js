@@ -228,7 +228,7 @@ function updateDroplets() {
         // var surrounding_density = 0.1;  // external_density.read;
         var buoyancyAcc = densityAir * gravityAcc * volume / mass; 
 
-        // --y-- gravity, buoyancy 福利
+        // --y-- gravity, buoyancy
         ay -= gravityAcc / 780; // m to dm
         ay += buoyancyAcc;
 
