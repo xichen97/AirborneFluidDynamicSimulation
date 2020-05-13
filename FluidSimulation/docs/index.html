@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+        <title>Fluid Simulator</title>
+        <style>
+            body {
+                margin: 0;
+                overflow: hidden;
+            }
+
+            canvas {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="btn"></div>
+        <script id = "Advect" type = "shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform sampler2D velocityField;
+            uniform sampler2D advectionField;
+            uniform float dissipation;
+            uniform float dt;
+
+            vec2 bilerp(sampler2D texture, vec2 coord)
+            {
+
+                float s = coord.x - (floor(coord.x - 0.5) + 0.5);
+                float t = coord.y - (floor(coord.y - 0.5) + 0.5);
+    
+                vec4 uv;
+                uv.xy = (floor(coord - 0.5) + 0.5) / res.xy;
+                uv.zw = (floor(coord - 0.5) + 1.5) / res.xy;
+    
+                vec2 u00 = texture2D(texture, uv.xy).xy;
+                vec2 u10 = texture2D(texture, uv.zy).xy;
+    
+
+                vec2 u0 = mix(u00, u10, s);
+    
+                vec2 u01 = texture2D(texture, uv.xw).xy;
+                vec2 u11 = texture2D(texture, uv.zw).xy;
+    
+                vec2 u1 =  mix(u01, u11, s);
+    
+                return mix(u0, u1, t);
+            }
+
+        
+            void main(){
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec2 last_position = gl_FragCoord.xy - texture2D(velocityField, coord).xy * dt;
+                gl_FragColor = vec4(dissipation * bilerp(advectionField, last_position), 0.0, 1.0);
+                gl_FragColor.z = gl_FragColor.x;
+            }
+        </script>
+
+        <script id="ExternalForces" type="shader-code">
+            uniform vec2 res;             
+            uniform sampler2D velocityField;
+
+            uniform sampler2D densityField;
+            uniform float kappa;
+            uniform sampler2D temperatureField;
+            uniform float ambientTemperature;
+            uniform float sigma;
+            
+            
+            uniform float gravity;
+            uniform float dt;
+
+            void main() {
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec4 v = texture2D(velocityField, coord);
+                float t = texture2D(temperatureField, coord).x;
+                float d = texture2D(densityField, coord).x;
+
+                gl_FragColor  = v;
+                
+                // gravity
+                // gl_FragColor  += vec4(0.0, -gravity * dt , 0.0, 0.0); 
+
+                // buoyancy
+                //down (density related)
+                gl_FragColor  += vec4(0.0, -d * kappa * dt / 50.0, 0.0, 0.0);  // kappa is a constant mass scale factor.
+                
+                //up (temperature related)
+                gl_FragColor  += vec4(0.0, sigma * (t - ambientTemperature) * dt, 0.0, 0.0);  
+            }
+        </script>
+
+
+        <script id="ExternalVelocity" type="shader-code">
+            uniform vec2 res;                    // The width and height of our screen
+            uniform sampler2D bufferTexture;     // Our input texture
+            uniform vec3 smokeSource;            // The x,y are the posiiton. 
+            uniform vec2 sourceVelocity;
+            uniform float radius;
+            uniform float dt;
+    
+            void main() {
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec2 dir = gl_FragCoord.xy - smokeSource.xy;
+                dir = normalize(dir);
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                vec2 vel = sourceVelocity;
+                vel.y = vel.x * dir.y;
+                vel.x = vel.x;
+                if(dir.x < 0.0){
+                    vel.x=0.0;
+                    vel.y=0.0;
+                }   
+                vec2 smoke = smokeSource.z * max(radius-dist,0.0) * vel / res.xy;
+                gl_FragColor = vec4(texture2D(bufferTexture, coord).xy + smoke, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="ExternalDensity" type="shader-code">
+            uniform vec2 res;                    // The width and height of our screen
+            uniform sampler2D bufferTexture;     // Our input texture
+            uniform vec3 smokeSource;            // The x,y are the posiiton. 
+            uniform vec3 sourceDensity;
+            uniform float radius;
+            uniform float dt;
+    
+            void main() {
+                vec2 dir = gl_FragCoord.xy - smokeSource.xy;
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                vec3 smoke = vec3(smokeSource.z * max(radius-dist,0.0) / res.xy, 0.0) * sourceDensity;
+                if(dir.x <= 0.0){
+                    smoke = vec3(0.0,0.0,0.0);
+                }
+                gl_FragColor = vec4(texture2D(bufferTexture, coord).xyz + smoke, 1.0);
+            }
+        </script>
+
+        <script id="BoundaryVelocity" type="shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform sampler2D bufferTexture;
+            uniform float scale;
+
+            uniform vec2 face_bottom_left;
+            uniform vec2 face_up_right;
+            uniform vec2 nose_bottom_left;
+            uniform vec2 nose_up_right;
+            uniform vec2 chin_bottom_left;
+            uniform vec2 chin_up_right;
+            uniform vec2 mask_bottom_left;
+            uniform vec2 mask_up_right;
+
+            uniform vec2 x_right_offset;
+            uniform vec2 y_top_offset;
+            uniform vec2 y_bottom_offset;
+            uniform vec2 x_left_offset;
+            
+            uniform float dt;
+            
+            void main(){
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec4 v = texture2D(bufferTexture, coord);
+                vec2 last_position = gl_FragCoord.xy - v.xy * dt;
+                
+                
+                // head
+                if (gl_FragCoord.x > face_bottom_left.x && gl_FragCoord.x < face_up_right.x
+                    && gl_FragCoord.y > face_bottom_left.y && gl_FragCoord.y < face_up_right.y){
+                    
+                    if(last_position.x <= face_bottom_left.x){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                        last_v.x = scale * last_v.x;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+
+                    else if(last_position.x >= face_up_right.x){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                        last_v.x = scale * last_v.x;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else if(last_position.y <= face_bottom_left.y){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                        last_v.y = scale * last_v.y;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else if(last_position.y >= face_up_right.y){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                        last_v.y = scale * last_v.y;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else{
+                        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    }
+                }
+
+                // nose
+                else if (gl_FragCoord.x > nose_bottom_left.x && gl_FragCoord.x < nose_up_right.x
+                    && gl_FragCoord.y > nose_bottom_left.y && gl_FragCoord.y < nose_up_right.y){
+
+                        if(last_position.x <= nose_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= nose_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= nose_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= nose_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+
+                }
+
+                // chin
+                else if (gl_FragCoord.x > chin_bottom_left.x && gl_FragCoord.x < chin_up_right.x
+                    && gl_FragCoord.y > chin_bottom_left.y && gl_FragCoord.y < chin_up_right.y){
+                        if(last_position.x <= chin_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= chin_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= chin_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= chin_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                }
+
+                // mask
+                else if (gl_FragCoord.x > mask_bottom_left.x && gl_FragCoord.x < mask_up_right.x
+                    && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y){
+                        if(last_position.x <= mask_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= mask_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.x = scale * last_v.x;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= mask_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= mask_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.y = scale * last_v.y;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                }
+
+                // through mask
+                else if(gl_FragCoord.x > mask_up_right.x && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y && last_position.x <= mask_bottom_left.x){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+                
+                else{
+                    gl_FragColor = vec4(texture2D(bufferTexture, gl_FragCoord.xy / res.xy).xyz, 1.0);
+                }
+            }
+        </script>
+
+        <script id="BoundaryPressure" type="shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform sampler2D bufferTexture;
+            uniform sampler2D velocityField;
+            uniform float scale;
+
+            uniform vec2 face_bottom_left;
+            uniform vec2 face_up_right;
+            uniform vec2 nose_bottom_left;
+            uniform vec2 nose_up_right;
+            uniform vec2 chin_bottom_left;
+            uniform vec2 chin_up_right;
+            uniform vec2 mask_bottom_left;
+            uniform vec2 mask_up_right;
+
+            uniform vec2 x_right_offset;
+            uniform vec2 y_top_offset;
+            uniform vec2 y_bottom_offset;
+            uniform vec2 x_left_offset;
+            
+            uniform float dt;
+            
+            void main(){
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec4 v = texture2D(velocityField, coord);
+                vec2 last_position = gl_FragCoord.xy - v.xy * dt;
+                
+                
+                // head
+                if (gl_FragCoord.x > face_bottom_left.x && gl_FragCoord.x < face_up_right.x
+                    && gl_FragCoord.y > face_bottom_left.y && gl_FragCoord.y < face_up_right.y){
+                    
+                    if(last_position.x <= face_bottom_left.x){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                        last_v.xy = scale * last_v.xy;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+
+                    else if(last_position.x >= face_up_right.x){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                        last_v.xy = scale * last_v.xy;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else if(last_position.y <= face_bottom_left.y){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                        last_v.xy = scale * last_v.xy;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else if(last_position.y >= face_up_right.y){
+                        vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                        last_v.xy = scale * last_v.xy;
+                        gl_FragColor = vec4(last_v,0.0,1.0);
+                    }
+                    else{
+                        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    }
+                }
+
+                // nose
+                else if (gl_FragCoord.x > nose_bottom_left.x && gl_FragCoord.x < nose_up_right.x
+                    && gl_FragCoord.y > nose_bottom_left.y && gl_FragCoord.y < nose_up_right.y){
+
+                        if(last_position.x <= nose_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= nose_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= nose_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= nose_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+
+                }
+
+                // chin
+                else if (gl_FragCoord.x > chin_bottom_left.x && gl_FragCoord.x < chin_up_right.x
+                    && gl_FragCoord.y > chin_bottom_left.y && gl_FragCoord.y < chin_up_right.y){
+                        if(last_position.x <= chin_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= chin_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= chin_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= chin_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                }
+
+                // mask
+                else if (gl_FragCoord.x > mask_bottom_left.x && gl_FragCoord.x < mask_up_right.x
+                    && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y){
+                        if(last_position.x <= mask_bottom_left.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_left_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+    
+                        else if(last_position.x >= mask_up_right.x){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + x_right_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y <= mask_bottom_left.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_bottom_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else if(last_position.y >= mask_up_right.y){
+                            vec2 last_v = texture2D(bufferTexture, (gl_FragCoord.xy + y_top_offset) / res.xy).xy;
+                            last_v.xy = scale * last_v.xy;
+                            gl_FragColor = vec4(last_v,0.0,1.0);
+                        }
+                        else{
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        }
+                }
+
+                // through mask
+                else if(gl_FragCoord.x > mask_up_right.x && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y && last_position.x <= mask_bottom_left.x){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+                
+                else{
+                    gl_FragColor = vec4(texture2D(bufferTexture, gl_FragCoord.xy / res.xy).xyz, 1.0);
+                }
+            }
+        </script>
+
+        <script id="BoundaryDensity" type="shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform sampler2D bufferTexture;
+            uniform sampler2D velocityField;
+            uniform float scale;
+
+            uniform vec2 face_bottom_left;
+            uniform vec2 face_up_right;
+            uniform vec2 nose_bottom_left;
+            uniform vec2 nose_up_right;
+            uniform vec2 chin_bottom_left;
+            uniform vec2 chin_up_right;
+            uniform vec2 mask_bottom_left;
+            uniform vec2 mask_up_right;
+            
+            uniform float dt;
+            
+            void main(){
+                vec2 coord = gl_FragCoord.xy / res.xy;
+                vec4 v = texture2D(velocityField, coord);
+                vec2 last_position = gl_FragCoord.xy - v.xy * dt;
+
+                // head
+                if (gl_FragCoord.x > face_bottom_left.x && gl_FragCoord.x < face_up_right.x
+                    && gl_FragCoord.y > face_bottom_left.y && gl_FragCoord.y < face_up_right.y){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+
+                // nose
+                else if (gl_FragCoord.x > nose_bottom_left.x && gl_FragCoord.x < nose_up_right.x
+                    && gl_FragCoord.y > nose_bottom_left.y && gl_FragCoord.y < nose_up_right.y){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+
+                // chin
+                else if (gl_FragCoord.x > chin_bottom_left.x && gl_FragCoord.x < chin_up_right.x
+                    && gl_FragCoord.y > chin_bottom_left.y && gl_FragCoord.y < chin_up_right.y){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+
+                // mask
+                else if (gl_FragCoord.x > mask_bottom_left.x && gl_FragCoord.x < mask_up_right.x
+                    && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+
+                // through mask
+                else if(gl_FragCoord.x > mask_up_right.x && gl_FragCoord.y > mask_bottom_left.y && gl_FragCoord.y < mask_up_right.y && last_position.x <= mask_bottom_left.x){
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+                
+                else{
+                    gl_FragColor = vec4(texture2D(bufferTexture, gl_FragCoord.xy / res.xy).xyz, 1.0);
+                }
+            }
+        </script> 
+
+        <script id="Draw" type="shader-code">
+            precision mediump float;
+            uniform vec2 res;
+            uniform vec3 bias;
+            uniform vec3 scale;
+            uniform sampler2D bufferTexture;
+    
+            void main() {
+                vec2 pixel = gl_FragCoord.xy / res.xy;
+                vec3 v = bias + scale * texture2D(bufferTexture, pixel).xyz;
+                
+                v.x = min(v.x, 1.0);
+                v.x = max(v.x, 0.0);
+                v.y = min(v.y, 1.0);
+                v.y = max(v.y, 0.0);
+                v.z = min(v.z, 1.0);
+                v.z = max(v.z, 0.0);
+                
+                gl_FragColor = vec4(v, 1.0);
+            }
+        </script>
+
+        <script id="Divergence" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D u;
+            uniform float dx;
+            uniform float dy;
+    
+            void main() {
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
+    
+                float uterm = (texture2D(u, cur + xstep).x - texture2D(u, cur - xstep).x) / (2.0 * dx);
+                float vterm = (texture2D(u, cur + ystep).y - texture2D(u, cur - ystep).y) / (2.0 * dy);
+    
+                gl_FragColor = vec4(uterm + vterm, 0.0, 0.0, 1.0);
+    
+            }
+        </script>
+
+        <script id="Curl" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D u;
+            uniform float dx;
+            uniform float dy;
+    
+            void main() {
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
+    
+                float dqdx = (texture2D(u, cur + ystep).x - texture2D(u, cur - ystep).x) / (2.0 * dx);
+                float dpdy = (texture2D(u, cur + xstep).y - texture2D(u, cur - xstep).y) / (2.0 * dy);
+    
+                gl_FragColor = vec4(dqdx - dpdy, 0.0, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="VorticityFunc" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D velocity;
+            uniform sampler2D curl;
+            uniform float weight;
+            uniform float dx;
+            uniform float dy;
+            uniform float dt;
+            uniform float threshold;
+    
+            void main() {
+                vec2 xstep = vec2(1.0 / res.x, 0.0);
+                vec2 ystep = vec2(0.0, 1.0 / res.y);
+                vec2 cur = gl_FragCoord.xy / res.xy;
+    
+                float etaX = (abs(texture2D(velocity, cur + xstep).x) - abs(texture2D(velocity, cur - xstep).x)) / (2.0 * dx);
+                float etaY = (abs(texture2D(velocity, cur + ystep).y) - abs(texture2D(velocity, cur - ystep).y)) / (2.0 * dy);
+
+                vec2 force = vec2(0.0);
+
+                if (abs(etaX) > threshold && abs(etaY) > threshold) {
+    
+                    vec2 psi = vec2(etaX / abs(etaX), etaY / abs(etaY));
+                    vec2 vorticity = texture2D(curl, cur).xy;
+                    vec2 cross = vec2(psi.x * vorticity.y, psi.y * vorticity.x * -1.0);
+                    force = cross * dt;
+                }
+                vec2 new_velocity = texture2D(velocity, cur).xy;
+                gl_FragColor = vec4(new_velocity + weight * force, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="Jacobi" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D x;
+            uniform sampler2D b;
+            uniform float alpha;
+            uniform float beta;
+    
+            void main() {
+                vec2 istep = vec2(1.0 / res.x, 0.0);
+                vec2 jstep = vec2(0.0, 1.0 / res.y);
+                vec2 ij = gl_FragCoord.xy / res.xy;
+    
+                gl_FragColor = vec4( (texture2D(x, ij - istep).x + texture2D(x, ij + istep).x + texture2D(x, ij + jstep).x + texture2D(x, ij - jstep).x + alpha * texture2D(b, ij).x) / beta, 0.0, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="SubtractGradient" type="shader-code">
+            uniform vec2 res;
+            uniform sampler2D w;
+            uniform sampler2D p;
+            uniform float dx;
+            uniform float dy;
+            uniform float dt;
+    
+            void main() {
+                vec2 istep = vec2(1.0 / res.x, 0.0);
+                vec2 jstep = vec2(0.0, 1.0 / res.y);
+                vec2 ij = gl_FragCoord.xy / res.xy;
+    
+                vec2 gradient = vec2((texture2D(p, ij + istep).x - texture2D(p, ij - istep).x) / (2.0 * dx), (texture2D(p, ij + jstep).x - texture2D(p, ij - jstep).x) / (2.0 * dy));
+    
+                gl_FragColor = vec4(texture2D(w, ij).xy - gradient * dt, 0.0, 1.0);
+    
+            }
+        </script>
+
+        <script id="ExternalTemperature" type="shader-code">
+            uniform vec2 res;                    //The width and height of our screen
+            uniform sampler2D bufferTexture;     //Our input texture
+            uniform vec3 smokeSource;            //The x,y are the posiiton. The z is the power/density
+            uniform float temp;
+            uniform float radius;
+    
+            void main() {
+                vec2 dir = gl_FragCoord.xy - smokeSource.xy;
+                vec2 pixel = gl_FragCoord.xy / res.xy;
+                float dist = distance(smokeSource.xy,gl_FragCoord.xy);
+                float smoke = smokeSource.z * max(radius-dist,0.0) * temp;
+                if(dir.x < 0.0){
+                    smoke = 0.0;
+                }
+                gl_FragColor = vec4(texture2D(bufferTexture, pixel).x + smoke, 0.0, 0.0, 1.0);
+            }
+        </script>
+
+        
+        <script src="../js/three.js"></script>
+        <script src="../js/Advect.js"></script>
+        <script src="../js/BoundaryDensity.js"></script>
+        <script src="../js/BoundaryPressure.js"></script>
+        <script src="../js/BoundaryVelocity.js"></script>
+        <script src="../js/Curl.js"></script>
+        <script src="../js/ExternalVelocity.js"></script>
+        <script src="../js/ExternalForces.js"></script>
+        <script src="../js/ExternalDensity.js"></script>
+        <script src="../js/ExternalTemperature.js"></script>
+        <script src= "../js/Divergence.js"></script>
+        <script src= "../js/Jacobi.js"></script>
+        <script src="../js/SubtractGradient.js"></script>
+        <script src="../js/Draw.js"></script>
+        <script src="../js/Slab.js"></script>
+        <script src="../js/VorticityFunc.js"></script>
+        <script src="../js/main.js"></script>
+    </body>
+
+
+</html>
